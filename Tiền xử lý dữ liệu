@@ -1,0 +1,191 @@
+# Delete the rows with 'NA' values
+for column in df.columns:
+    if df.schema[column].dataType == pyspark.sql.types.StringType():
+        df = df.filter(df[column] != "NA")
+
+
+# Check the description of Churn column
+df.select("Churn").describe().show()
+
+# Going through all columns required to be transfer into numerical values
+columns_string = [
+    column
+    for column in df.columns
+    if df.schema[column].dataType == pyspark.sql.types.StringType()
+]
+columns_string
+
+
+# create the view of df under spark
+df.createOrReplaceTempView("df")
+
+# check the distribution of picked columns
+spark.sql(
+    "SELECT \
+            Churn, \
+            CAST (avg(MonthlyRevenue) as decimal(8,2)) as avg_MonthlyRevenue, \
+            CAST (avg(MonthlyMinutes) as decimal(8,2)) as avg_MonthlyMinutes, \
+            CAST (avg(CurrentEquipmentDays) as decimal(8,2)) as avg_CurrentEquipmentDays, \
+            CAST (avg(TotalRecurringCharge) as decimal(8,2)) as avg_TotalRecurringCharge, \
+            CAST (avg(OverageMinutes) as decimal(8,2)) as avg_OverageMinutes, \
+            CAST (avg(RoamingCalls) as decimal(8,2)) as avg_RoamingCalls \
+            FROM df GROUP BY Churn"
+).show()
+
+
+# Check the values of string columns
+df.select([column for column in df.columns if column in columns_string]).show(1)
+
+
+
+# Loop the list and use StringIndexer encodes the string columns of labels(Yes or No) to columns of label indices(1 or 0)
+for column in columns_for_indexer:
+    indexer = StringIndexer(inputCol=column, outputCol=column + "Index")
+    df = indexer.fit(df).transform(df)
+
+
+
+
+
+# Drop the original string columns of labels
+df = df.select([column for column in df.columns if column not in columns_for_indexer])
+
+
+
+# Check the Churn column again to confirm the result
+df.select("ChurnIndex").describe().show()
+
+
+
+
+# Replace unknown values to 0 for Price Column
+df = df.replace(to_replace={"Unknown": "0"}, subset=["HandsetPrice"])
+
+
+
+
+# Delete the rows with 'NA' values
+for column in df.columns:
+    if df.schema[column].dataType == pyspark.sql.types.StringType():
+        df = df.filter(df[column] != "Unknown")
+
+
+
+
+
+# Another Iteration for feature engineering
+columns_string = [
+    column
+    for column in df.columns
+    if df.schema[column].dataType == pyspark.sql.types.StringType()
+]
+columns_string
+
+
+
+
+# Mapping string values into integer based on its values
+mapping_PrizmCode = {"Other": "0", "Suburban": "1", "Town": "2", "Rural": "3"}
+df = df.replace(to_replace=mapping_PrizmCode, subset=["PrizmCode"])
+
+
+
+
+
+
+# Prepare the list of columns to be transformed into float
+columns_to_float = [
+    "MonthlyRevenue",
+    "MonthlyMinutes",
+    "TotalRecurringCharge",
+    "DirectorAssistedCalls",
+    "OverageMinutes",
+    "RoamingCalls",
+    "PercChangeMinutes",
+    "PercChangeRevenues",
+]
+
+
+
+
+# Transform ServiceArea and CreditRating columns only to keep the int value
+df = df.withColumn("ServiceArea", df["ServiceArea"].substr(-3, 3))
+df = df.withColumn("CreditRating", df["CreditRating"].substr(1, 1))
+
+
+
+
+# Transform the type of columns to float
+for column in columns_to_float:
+    df = df.withColumn(column, df[column].cast("float"))
+
+
+
+# Create a Pandas DataFrame for data visualization
+df_pd = df.toPandas()
+
+
+
+
+
+# Before transform the type of Occupation column, let's check it's distribution first
+graph = df_pd[["Occupation", "MonthlyRevenue"]]
+ax = sns.barplot(x="Occupation", y="MonthlyRevenue", data=graph)
+
+
+
+
+# Transform string values to numbers using mapping
+temp = (
+    df_pd.loc[:, ["Occupation", "MonthlyRevenue"]]
+    .groupby("Occupation")
+    .mean()
+    .sort_values(["MonthlyRevenue"], ascending=[0])
+)
+
+mapping_Occupation = dict([temp.index[i], str(i)] for i in range(len(temp)))
+print(mapping_Occupation)
+
+df = df.replace(to_replace=mapping_Occupation, subset=["Occupation"])
+
+
+
+
+# Prepare the list of columns to be transformed into integer
+columns_to_int = [
+    "Handsets",
+    "HandsetModels",
+    "CurrentEquipmentDays",
+    "AgeHH1",
+    "AgeHH2",
+    "HandsetPrice",
+    "ServiceArea",
+    "CreditRating",
+    "PrizmCode",
+    "Occupation",
+    "ChurnIndex",
+    "ChildrenInHHIndex",
+    "HandsetRefurbishedIndex",
+    "HandsetWebCapableIndex",
+    "TruckOwnerIndex",
+    "RVOwnerIndex",
+    "HomeownershipIndex",
+    "BuysViaMailOrderIndex",
+    "RespondsToMailOffersIndex",
+    "OptOutMailingsIndex",
+    "NonUSTravelIndex",
+    "OwnsComputerIndex",
+    "HasCreditCardIndex",
+    "NewCellphoneUserIndex",
+    "NotNewCellphoneUserIndex",
+    "OwnsMotorcycleIndex",
+    "MadeCallToRetentionTeamIndex",
+    "MaritalStatusIndex",
+]
+
+
+
+
+# Transform the type of columns to integer
+for column in columns_to_int:
+    df = df.withColumn(column, df[column].cast("int"))
